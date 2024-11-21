@@ -20,7 +20,7 @@ class GeotiffReader(Reader):
         raise NotImplementedError("method to_xarray() not implemented")
 
 
-def is_tiff(data):
+def is_geotiff(data):
     try:
         # Check if there are at least 8 bytes for TIFF header
         if len(data) < 8:
@@ -40,18 +40,46 @@ def is_tiff(data):
         if magic_number != 42:
             return False  # It is not a valid TIFF file
 
-        # Validations checked, it is a valid TIFF file
+        # Get offset to first Image File Directory (IFD)
+        ifd_offset = struct.unpack(endian + "I", data[4:8])[0]
+        if ifd_offset >= len(data):
+            # if IFD offset is beyond data length, then not ok
+            return False
+
+        # Read number of IFD entries (2 bytes at the offset)
+        num_ifd_entries = struct.unpack(
+            endian + "H", data[ifd_offset : ifd_offset + 2]
+        )[0]
+
+        # Check each IFD entry (12 bytes per entry)
+        found_geotiff_tag = False
+        for i in range(num_ifd_entries):
+            entry_offset = ifd_offset + 2 + i * 12
+            if entry_offset + 12 > len(data):
+                return False
+
+            tag_id = struct.unpack(endian + "H", data[entry_offset : entry_offset + 2])[
+                0
+            ]
+
+            # Check for GeoKeyDirectoryTag (34735)
+            if tag_id == 34735:
+                found_geotiff_tag = True
+                break
+
+        if not found_geotiff_tag:
+            return False
+
         return True
 
     except Exception as e:
-        LOG.exception(f"An error has occurred in is_tiff_from_bytes, {e}")
+        print(f"An error occurred in is_geotiff: {e}")
         return False
 
 
 def reader(source, path, *, magic=None, deeper_check=False, **kwargs):
     """
-    'is_tiff' function checks only if a file is a valid tiff,
-    but it doesn't check if there are geographic information
+    'is_geotiff' function checks if a file is a valid geotiff
     """
-    if is_tiff(magic):
+    if is_geotiff(magic):
         return GeotiffReader(source, path)
